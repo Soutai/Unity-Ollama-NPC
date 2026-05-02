@@ -7,44 +7,79 @@ public class NPCSpeech : MonoBehaviour
     [Header("UI 引用")]
     public GameObject speechBubble;
     public TextMeshProUGUI speechText;
-    public float displayDuration = 4f;
 
-    // 订阅全局树木摇晃事件
+    [Header("显示设置")]
+    [Tooltip("文字完全显示后停留的时间（秒）")]
+    public float displayDuration = 8f;
+
+    private Coroutine autoHideCoroutine;
+
+    // 订阅事件
     void OnEnable() => TreeInteract.OnAnyTreeShaken += HandleTreeShaken;
     void OnDisable() => TreeInteract.OnAnyTreeShaken -= HandleTreeShaken;
 
     private void HandleTreeShaken(string treeName)
     {
-        // 自动在场景中寻找现有的 LLMClient (本地 Ollama 客户端)
-        LLMClient localLLM = Object.FindAnyObjectByType<LLMClient>();
+        // 查找场景中的 LLMClient
+        LLMClient localLLM = FindObjectOfType<LLMClient>();
 
         if (localLLM == null)
         {
-            Debug.LogError("场景中找不到 LLMClient！请确保场景中有一个物体挂载了该脚本。");
+            Debug.LogError("场景中找不到 LLMClient！请检查场景物体。");
             return;
         }
 
-        StopAllCoroutines();
+        // 停止之前的倒计时
+        if (autoHideCoroutine != null)
+            StopCoroutine(autoHideCoroutine);
 
-        // 构造发送给 Ollama 的指令
-        // 这里加上 N3 级别的日语要求，让你的学习环境更真实
+        // 重置 UI 状态
+        speechText.text = "";
+        if (speechBubble != null)
+            speechBubble.SetActive(true);
+
+        // 构造 AI 提示词
         string prompt = $"玩家摇晃了 {treeName}。请作为 NPC 用一句简短的中文吐槽这种行为，要求幽默且不超过 15 字。";
 
-        // 精准对接你代码里的 AskAI 方法
-        localLLM.AskAI(prompt, (response) => {
-            StartCoroutine(ShowSpeech(response));
-        });
+        // 发起流式请求
+        localLLM.AskAIStream(
+            prompt,
+            onTokenReceived: (token) =>
+            {
+                // 直接累加字符
+                speechText.text += token;
+            },
+            onComplete: (fullText) =>
+            {
+                // 确保显示完整文本
+                speechText.text = fullText;
+
+                // 播放完毕后，启动自动消失倒计时
+                if (autoHideCoroutine != null) StopCoroutine(autoHideCoroutine);
+                autoHideCoroutine = StartCoroutine(AutoHideSpeech());
+            }
+        );
     }
 
-    private IEnumerator ShowSpeech(string message)
+    private IEnumerator AutoHideSpeech()
     {
-        if (speechText == null || speechBubble == null) yield break;
-
-        speechText.text = message;
-        speechBubble.SetActive(true);
-
+        // 等待设定的时长
         yield return new WaitForSeconds(displayDuration);
 
-        speechBubble.SetActive(false);
+        if (speechBubble != null)
+            speechBubble.SetActive(false);
+
+        speechText.text = "";
+    }
+
+    public void HideSpeech()
+    {
+        if (autoHideCoroutine != null)
+            StopCoroutine(autoHideCoroutine);
+
+        if (speechBubble != null)
+            speechBubble.SetActive(false);
+
+        speechText.text = "";
     }
 }
