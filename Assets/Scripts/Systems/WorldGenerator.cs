@@ -3,7 +3,7 @@ using UnityEngine;
 public class WorldGenerator : MonoBehaviour
 {
     public GameObject treePrefab;
-    public int treeCount = 20;
+    public int treeCount = 50;
     public Vector2 spawnRange = new Vector2(50, 50);
 
     void Start() => GenerateWorld();

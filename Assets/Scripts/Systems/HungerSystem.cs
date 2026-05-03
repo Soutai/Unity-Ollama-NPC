@@ -5,7 +5,7 @@ public class HungerSystem : MonoBehaviour
     [Header("饥饿设置")]
     public float maxHunger = 100f;
     public float currentHunger = 100f;
-    public float hungerDrainRate = 0.5f; // 每秒消耗速度
+    public float hungerDrainRate = 2f; // 每秒消耗速度
 
     void Update()
     {

@@ -9,35 +9,42 @@ public class TreeInteract : MonoBehaviour
     public Sprite emptyTreeSprite;
     public Transform dropPoint;
 
-    // 使用 C# 原生 Action，比 UnityEvent 更简洁高效
     public static event Action<string> OnAnyTreeShaken;
 
     private SpriteRenderer sr;
     private int applesLeft;
-    private bool hasApples = true;
+    // 暴露给 AI 检查的属性
+    public bool hasApples { get; private set; } = true;
 
     void Start()
     {
         sr = GetComponentInChildren<SpriteRenderer>();
+        // 随机 3 个的设定
         applesLeft = UnityEngine.Random.Range(1, 4);
         if (dropPoint == null) dropPoint = transform.Find("Drop Point") ?? transform;
     }
 
-    public void Interact()
+    // 修改：让方法返回布尔值，方便 AI 判断
+    public bool Interact()
     {
-        if (!hasApples) return;
+        if (!hasApples) return false;
 
         DropApple();
-        // 静态事件分发：谁感兴趣谁监听（比如 AI）
         OnAnyTreeShaken?.Invoke(gameObject.name);
+        return true;
     }
 
     void DropApple()
     {
-        Instantiate(applePrefab, dropPoint.position, Quaternion.identity);
+        if (applePrefab != null)
+        {
+            Instantiate(applePrefab, dropPoint.position, Quaternion.identity);
+        }
+
         if (--applesLeft <= 0)
         {
             hasApples = false;
+            // 切换为没苹果的树皮
             if (sr && emptyTreeSprite) sr.sprite = emptyTreeSprite;
         }
     }
