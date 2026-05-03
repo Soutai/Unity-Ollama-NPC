@@ -34,15 +34,7 @@ public class NPCMotor : MonoBehaviour
 
     void Update()
     {
-        // 1. 动画控制：根据 agent.velocity.magnitude 传值给 Speed 参数[cite: 1, 2]
-        float currentSpeed = agent.velocity.magnitude;
-        if (anim != null) anim.SetFloat("Speed", currentSpeed);
-
-        // 2. 转向控制[cite: 1, 2]
-        if (agent.velocity.x > 0.1f) transform.localScale = new Vector3(-1, 1.2f, 1);
-        else if (agent.velocity.x < -0.1f) transform.localScale = new Vector3(1, 1.2f, 1);
-
-        // 3. 执行决策
+        // 删除了原有的动画和 Scale 控制代码，避免与 Bridge 脚本冲突
         GameObject targetObj = brain.GetCurrentTarget();
         if (targetObj != null)
         {
@@ -90,13 +82,14 @@ public class NPCMotor : MonoBehaviour
     void Wander()
     {
         agent.stoppingDistance = 0f;
-        // 漫游时更慢一点，像是在散步
         agent.speed = walkSpeed * 0.7f;
 
-        if (!agent.hasPath || agent.remainingDistance < 0.5f)
+        // 修正：!agent.pathPending 确保路径计算完成[cite: 4]
+        if (!agent.pathPending && agent.remainingDistance < 0.5f)
         {
             Vector2 randomDir = Random.insideUnitCircle * 4f;
-            Vector3 wanderPos = transform.position + new Vector3(randomDir.x, randomDir.y, 0);
+            // 修正：将 Y 的随机值给到 Z 轴，匹配 3D 平面逻辑[cite: 3, 4]
+            Vector3 wanderPos = transform.position + new Vector3(randomDir.x, 0, randomDir.y);
             agent.SetDestination(wanderPos);
         }
     }
