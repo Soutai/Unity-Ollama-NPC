@@ -9,28 +9,32 @@ public class NPCMotor : MonoBehaviour
 
     [Header("移动设置")]
     public float walkSpeed = 2.0f;
-    public float runSpeed = 3.5f;
+    public float runSpeed = 4.0f; // 跑速已调高
 
     private List<Vector3> waypoints = new List<Vector3>();
     private int currentWaypointIndex = 0;
     private string currentExecutingAction;
     private GameObject currentExecutingTarget;
 
-    // --- 修改：用于物理位移的方向记录 ---
-    private Vector3 lastForwardDirection = Vector3.forward;
-    // --- 新增：用于存储“探路大意图”的方向基准，不受局部绕路影响 ---
     private Vector3 explorationBaseDir = Vector3.forward;
 
     void Awake()
     {
         brain = GetComponent<NPCUtilityBrain>();
         needs = GetComponent<NPCNeeds>();
+        explorationBaseDir = transform.forward;
     }
 
     void Update()
     {
         GameObject targetObj = brain.GetCurrentTarget();
         string action = brain.currentAction.actionName;
+
+        // 如果目标在外部被销毁，强制重置执行状态
+        if (currentExecutingTarget == null && targetObj != null)
+        {
+            currentExecutingAction = "";
+        }
 
         if (action != currentExecutingAction || targetObj != currentExecutingTarget)
         {
@@ -57,111 +61,78 @@ public class NPCMotor : MonoBehaviour
         {
             destination = target.transform.position;
         }
-        else if (action == "探索新区域")
+        else if (action.Contains("探索") || action.Contains("寻找")) // 模糊匹配
         {
-            // --- 策略：基于大意图方向旋转，而非实时物理方向 ---[cite: 23]
-            Vector3 forward = explorationBaseDir;
-            forward.y = 0;
-            if (forward.sqrMagnitude < 0.1f) forward = Vector3.forward;
-
-            // 在意图方向正前方 [-30°, 30°] 随机旋转[cite: 23]
-            float randomAngle = Random.Range(-30f, 30f);
-            Quaternion rotation = Quaternion.Euler(0, randomAngle, 0);
-            Vector3 searchDirection = (rotation * forward).normalized;
-
-            float distance = Random.Range(40f, 60f);
-            destination = transform.position + searchDirection * distance;
-
-            // 只有确定了新的探路路径，才更新意图基准[cite: 23]
-            explorationBaseDir = searchDirection;
-            lastForwardDirection = searchDirection;
+            float angleRange = (Random.value > 0.85f) ? 30f : 5f;
+            // --- 修正后的行 ---
+            float randomAngle = Random.Range(-angleRange, angleRange);
+            explorationBaseDir = Quaternion.Euler(0, randomAngle, 0) * explorationBaseDir;
+            destination = transform.position + explorationBaseDir * Random.Range(50f, 80f);
         }
-        else // 闲逛
+        else
         {
-            Vector2 randomDir = Random.insideUnitCircle.normalized;
-            destination = transform.position + new Vector3(randomDir.x, 0, randomDir.y) * Random.Range(10f, 15f);
-            // 闲逛不更新意图基准
+            Vector2 rnd = Random.insideUnitCircle.normalized;
+            destination = transform.position + new Vector3(rnd.x, 0, rnd.y) * Random.Range(10f, 15f);
         }
 
         NavMeshHit hit;
-        if (NavMesh.SamplePosition(destination, out hit, 20f, NavMesh.AllAreas))
-        {
+        if (NavMesh.SamplePosition(destination, out hit, 10f, NavMesh.AllAreas))
             destination = hit.position;
-        }
 
         NavMeshPath path = new NavMeshPath();
         if (NavMesh.CalculatePath(transform.position, destination, NavMesh.AllAreas, path))
         {
-            if (path.status != NavMeshPathStatus.PathInvalid)
-            {
-                waypoints.AddRange(path.corners);
-                return;
-            }
+            waypoints.AddRange(path.corners);
         }
 
-        FinishTask();
+        if (waypoints.Count == 0 && target == null) FinishTask();
     }
 
     void ExecuteMovement(string action, GameObject target)
     {
-        float speed = (action == "闲逛") ? walkSpeed : runSpeed;
+        // 核心速度逻辑：根据饥饿值或是否有目标强制切换跑速
+        float speed = (target != null || (needs != null && needs.hunger < 60f)) ? runSpeed : walkSpeed;
 
         if (currentWaypointIndex < waypoints.Count)
         {
             Vector3 targetPoint = waypoints[currentWaypointIndex];
             targetPoint.y = transform.position.y;
-
-            // --- 逻辑保护：探索时，不要让局部的绕路位移干扰大方向记录 ---[cite: 23]
-            Vector3 moveDir = (targetPoint - transform.position).normalized;
-            if (moveDir.sqrMagnitude > 0.01f)
-            {
-                // 只有非探索状态（如闲逛）才让位移实时影响 lastForwardDirection
-                // 这样在探索结束瞬间，lastForwardDirection 依然是大意图的方向[cite: 23]
-                if (action != "探索新区域")
-                {
-                    lastForwardDirection = moveDir;
-                }
-            }
-
             transform.position = Vector3.MoveTowards(transform.position, targetPoint, speed * Time.deltaTime);
 
             if (Vector3.Distance(transform.position, targetPoint) < 0.2f)
-            {
                 currentWaypointIndex++;
+        }
+        else if (target != null)
+        {
+            Vector3 dir = (target.transform.position - transform.position);
+            dir.y = 0;
+            if (dir.magnitude > 0.1f)
+            {
+                transform.position += dir.normalized * speed * Time.deltaTime;
             }
         }
         else
         {
-            if (target == null)
-            {
-                FinishTask();
-            }
-            else
-            {
-                Vector3 dirToTarget = (target.transform.position - transform.position);
-                dirToTarget.y = 0;
-                if (dirToTarget.magnitude > 0.3f)
-                {
-                    transform.position += dirToTarget.normalized * speed * Time.deltaTime;
-                }
-            }
+            FinishTask();
         }
     }
 
     void CheckInteraction(GameObject target)
     {
         if (target == null) return;
-
         float dist = Vector3.Distance(transform.position, target.transform.position);
-        float limit = target.CompareTag("Tree") ? 1.8f : 0.8f;
+        float limit = target.CompareTag("Tree") ? 2.0f : 1.0f; // 宽松判定
 
         if (dist <= limit)
         {
+            bool interactionDone = false;
+
             if (target.CompareTag("Apple"))
             {
                 needs.ApplyEat(20f);
                 Destroy(target);
-                FinishTask();
+                currentExecutingTarget = null;
+                interactionDone = true;
             }
             else if (target.CompareTag("Tree"))
             {
@@ -169,9 +140,15 @@ public class NPCMotor : MonoBehaviour
                 if (tree != null && tree.hasApples)
                 {
                     tree.Interact();
+                    interactionDone = true;
                 }
-                FinishTask();
+                else
+                {
+                    interactionDone = true;
+                }
             }
+
+            if (interactionDone) FinishTask();
         }
     }
 
@@ -180,6 +157,6 @@ public class NPCMotor : MonoBehaviour
         currentExecutingAction = "";
         currentExecutingTarget = null;
         waypoints.Clear();
-        brain.ResetAction(); // 触发大脑重新 Think[cite: 20]
+        if (brain != null) brain.ResetAction();
     }
 }
