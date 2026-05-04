@@ -3,7 +3,7 @@ using UnityEngine;
 public class WorldGenerator : MonoBehaviour
 {
     public GameObject treePrefab;
-    public int treeCount = 50;
+    public int treeCount = 1;
 
     // 引用你的地面物体
     public Transform groundTransform;

@@ -2742,6 +2742,7 @@ MonoBehaviour:
     score: 0
     target: {fileID: 0}
     motive: 
+  lastDecisionScore: 0
 --- !u!114 &2010233091
 MonoBehaviour:
   m_ObjectHideFlags: 0

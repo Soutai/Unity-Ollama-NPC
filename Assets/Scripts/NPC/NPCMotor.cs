@@ -1,95 +1,185 @@
 using UnityEngine;
 using UnityEngine.AI;
+using System.Collections.Generic;
 
-[RequireComponent(typeof(NavMeshAgent))]
 public class NPCMotor : MonoBehaviour
 {
-    private NavMeshAgent agent;
     private NPCUtilityBrain brain;
     private NPCNeeds needs;
-    private Animator anim;
 
     [Header("移动设置")]
-    // 降低基础速度，1.5 - 2.0 比较像正常的走路速度
     public float walkSpeed = 2.0f;
-    // 降低加速度，让 NPC 启动和停止时有缓冲，不那么突兀
-    public float acceleration = 4.0f;
+    public float runSpeed = 3.5f;
+
+    private List<Vector3> waypoints = new List<Vector3>();
+    private int currentWaypointIndex = 0;
+    private string currentExecutingAction;
+    private GameObject currentExecutingTarget;
+
+    // --- 修改：用于物理位移的方向记录 ---
+    private Vector3 lastForwardDirection = Vector3.forward;
+    // --- 新增：用于存储“探路大意图”的方向基准，不受局部绕路影响 ---
+    private Vector3 explorationBaseDir = Vector3.forward;
 
     void Awake()
     {
-        agent = GetComponent<NavMeshAgent>();
         brain = GetComponent<NPCUtilityBrain>();
         needs = GetComponent<NPCNeeds>();
-        anim = GetComponent<Animator>();
-
-        // 2D 基础设置
-        agent.updateRotation = false;
-        agent.updateUpAxis = false;
-
-        // 在代码中初始化物理特性
-        agent.speed = walkSpeed;
-        agent.acceleration = acceleration;
-        agent.angularSpeed = 0; // 2D 旋转通常由 Scale 镜像控制，不需要 Agent 旋转[cite: 1, 2]
     }
 
     void Update()
     {
-        // 删除了原有的动画和 Scale 控制代码，避免与 Bridge 脚本冲突
         GameObject targetObj = brain.GetCurrentTarget();
+        string action = brain.currentAction.actionName;
+
+        if (action != currentExecutingAction || targetObj != currentExecutingTarget)
+        {
+            PlanNewPath(action, targetObj);
+            currentExecutingAction = action;
+            currentExecutingTarget = targetObj;
+        }
+
+        ExecuteMovement(action, targetObj);
+
         if (targetObj != null)
         {
-            MoveToTarget(targetObj);
             CheckInteraction(targetObj);
-        }
-        else
-        {
-            Wander();
         }
     }
 
-    void MoveToTarget(GameObject target)
+    void PlanNewPath(string action, GameObject target)
     {
-        agent.SetDestination(target.transform.position);
-        // 去目标点时使用标准走速
-        agent.speed = walkSpeed;
-        agent.stoppingDistance = target.CompareTag("Tree") ? 1.8f : 0.4f; 
+        waypoints.Clear();
+        currentWaypointIndex = 0;
+        Vector3 destination = transform.position;
+
+        if (target != null)
+        {
+            destination = target.transform.position;
+        }
+        else if (action == "探索新区域")
+        {
+            // --- 策略：基于大意图方向旋转，而非实时物理方向 ---[cite: 23]
+            Vector3 forward = explorationBaseDir;
+            forward.y = 0;
+            if (forward.sqrMagnitude < 0.1f) forward = Vector3.forward;
+
+            // 在意图方向正前方 [-30°, 30°] 随机旋转[cite: 23]
+            float randomAngle = Random.Range(-30f, 30f);
+            Quaternion rotation = Quaternion.Euler(0, randomAngle, 0);
+            Vector3 searchDirection = (rotation * forward).normalized;
+
+            float distance = Random.Range(40f, 60f);
+            destination = transform.position + searchDirection * distance;
+
+            // 只有确定了新的探路路径，才更新意图基准[cite: 23]
+            explorationBaseDir = searchDirection;
+            lastForwardDirection = searchDirection;
+        }
+        else // 闲逛
+        {
+            Vector2 randomDir = Random.insideUnitCircle.normalized;
+            destination = transform.position + new Vector3(randomDir.x, 0, randomDir.y) * Random.Range(10f, 15f);
+            // 闲逛不更新意图基准
+        }
+
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(destination, out hit, 20f, NavMesh.AllAreas))
+        {
+            destination = hit.position;
+        }
+
+        NavMeshPath path = new NavMeshPath();
+        if (NavMesh.CalculatePath(transform.position, destination, NavMesh.AllAreas, path))
+        {
+            if (path.status != NavMeshPathStatus.PathInvalid)
+            {
+                waypoints.AddRange(path.corners);
+                return;
+            }
+        }
+
+        FinishTask();
+    }
+
+    void ExecuteMovement(string action, GameObject target)
+    {
+        float speed = (action == "闲逛") ? walkSpeed : runSpeed;
+
+        if (currentWaypointIndex < waypoints.Count)
+        {
+            Vector3 targetPoint = waypoints[currentWaypointIndex];
+            targetPoint.y = transform.position.y;
+
+            // --- 逻辑保护：探索时，不要让局部的绕路位移干扰大方向记录 ---[cite: 23]
+            Vector3 moveDir = (targetPoint - transform.position).normalized;
+            if (moveDir.sqrMagnitude > 0.01f)
+            {
+                // 只有非探索状态（如闲逛）才让位移实时影响 lastForwardDirection
+                // 这样在探索结束瞬间，lastForwardDirection 依然是大意图的方向[cite: 23]
+                if (action != "探索新区域")
+                {
+                    lastForwardDirection = moveDir;
+                }
+            }
+
+            transform.position = Vector3.MoveTowards(transform.position, targetPoint, speed * Time.deltaTime);
+
+            if (Vector3.Distance(transform.position, targetPoint) < 0.2f)
+            {
+                currentWaypointIndex++;
+            }
+        }
+        else
+        {
+            if (target == null)
+            {
+                FinishTask();
+            }
+            else
+            {
+                Vector3 dirToTarget = (target.transform.position - transform.position);
+                dirToTarget.y = 0;
+                if (dirToTarget.magnitude > 0.3f)
+                {
+                    transform.position += dirToTarget.normalized * speed * Time.deltaTime;
+                }
+            }
+        }
     }
 
     void CheckInteraction(GameObject target)
     {
+        if (target == null) return;
+
         float dist = Vector3.Distance(transform.position, target.transform.position);
-        if (dist <= agent.stoppingDistance + 0.3f)
+        float limit = target.CompareTag("Tree") ? 1.8f : 0.8f;
+
+        if (dist <= limit)
         {
             if (target.CompareTag("Apple"))
             {
-                needs.ApplyEat(20f); 
+                needs.ApplyEat(20f);
                 Destroy(target);
-                brain.ResetAction();
+                FinishTask();
             }
             else if (target.CompareTag("Tree"))
             {
-                TreeInteract tree = target.GetComponent<TreeInteract>(); 
+                TreeInteract tree = target.GetComponent<TreeInteract>();
                 if (tree != null && tree.hasApples)
                 {
-                    tree.Interact(); 
+                    tree.Interact();
                 }
-                brain.ResetAction();
+                FinishTask();
             }
         }
     }
 
-    void Wander()
+    void FinishTask()
     {
-        agent.stoppingDistance = 0f;
-        agent.speed = walkSpeed * 0.7f;
-
-        // 修正：!agent.pathPending 确保路径计算完成[cite: 4]
-        if (!agent.pathPending && agent.remainingDistance < 0.5f)
-        {
-            Vector2 randomDir = Random.insideUnitCircle * 2f;
-            // 修正：将 Y 的随机值给到 Z 轴，匹配 3D 平面逻辑[cite: 3, 4]
-            Vector3 wanderPos = transform.position + new Vector3(randomDir.x, 0, randomDir.y);
-            agent.SetDestination(wanderPos);
-        }
+        currentExecutingAction = "";
+        currentExecutingTarget = null;
+        waypoints.Clear();
+        brain.ResetAction(); // 触发大脑重新 Think[cite: 20]
     }
 }

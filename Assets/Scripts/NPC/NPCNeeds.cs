@@ -5,7 +5,7 @@ public class NPCNeeds : MonoBehaviour
 {
     [Header("生理数值")]
     public float hunger = 100.0f;
-    public float hungerDecayRate = 1.2f;
+    public float hungerDecayRate = 2f;
 
     [Header("感官设置")]
     public float sightRange = 12.0f;

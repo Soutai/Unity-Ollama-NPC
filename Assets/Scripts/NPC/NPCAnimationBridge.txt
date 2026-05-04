@@ -1,19 +1,20 @@
 ================================================================================
 【详细设计书】NPCAnimationBridge.cs
 ================================================================================
-版本：1.0
-模块：NPC 系统 - 导航速度与动画状态机桥接
+版本：2.0 (适配 NPCMotor 物理驱动版)
+模块：NPC 系统 - 自定义位移与动画状态机桥接
 文件：NPCAnimationBridge.cs 
 --------------------------------------------------------------------------------
 
 [1. 功能概要]
 --------------------------------------------------------------------------------
-本类作为 NavMeshAgent 与 Animator 之间的中间层，负责将物理移动参数转化为动画表现。 
+本类作为 NPCMotor 与 Animator 之间的中间层。由于放弃了 NavMeshAgent 的实时速度
+API，本脚本改用“手动位移差分法”计算速度矢量，并转化为动画表现。
 包含以下核心功能：
-- 自动提取 NavMeshAgent 的速度矢量，计算水平面上的实际移动速率。 
-- 方向镜像控制：根据 X 轴速度自动翻转 SpriteRenderer。 
-- 动画参数映射：将方向与平滑后的速度值同步至 Animator 的混合树（Blend Tree）。 
-- 运动层级转换：根据速度阈值在“行走”与“奔跑”动画状态间平滑过渡。 
+- 手动速度计算：通过记录上一帧位置与当前位置的差值，计算物理移动速率。 
+- 方向镜像控制：根据计算出的 X 轴速度分量自动翻转 SpriteRenderer。 
+- 动画参数映射：将实时方向与平滑后的速度值同步至 Animator 的混合树。 
+- 状态映射逻辑：根据实时速率判定“静止/行走/奔跑”并进行数值插值平滑。 
 
 [2. 变量定义 (Constants & Variables)]
 --------------------------------------------------------------------------------
@@ -21,52 +22,59 @@
   - 类型：float
   - 权限：public
   - 默认：10f
-  - 说明：动画速度参数改变时的平滑度，防止动画在静止和移动间瞬间切换。 
+  - 说明：动画速度参数改变时的平滑度，防止动画状态瞬间切换。[cite: 22]
 
 ■ 变量名：currentAnimSpeed
   - 类型：float
   - 权限：private
-  - 默认：0f
-  - 说明：当前应用于 Animator "Speed" 参数的内部平滑数值。 
+  - 说明：当前应用于 Animator "Speed" 参数的内部平滑数值（0-2 范围）。[cite: 22]
+
+■ 物理计算辅助变量：
+  - lastPosition (Vector3): 存储上一帧的世界坐标，用于计算位移。[cite: 22]
+  - currentVelocity (Vector3): 存储由位移差计算得出的实时速度矢量。[cite: 22]
 
 ■ 私有组件引用：
-  - agent (NavMeshAgent): 核心组件，提供实时速度 [velocity] 数据。 
-  - animator (Animator): 执行动画状态切换与参数更新的目标组件。 
-  - spriteRenderer (SpriteRenderer): 负责 2D 贴图显示及左右镜像翻转。 
+  - motor (NPCMotor): 获取当前 NPC 的移动逻辑状态。[cite: 22]
+  - animator (Animator): 执行动画更新。[cite: 22]
+  - spriteRenderer (SpriteRenderer): 负责 2D 左右镜像翻转。[cite: 22]
 
 [3. 方法逻辑 (Methods)]
 --------------------------------------------------------------------------------
 ■ 方法：Start() [Unity 回调]
-  - 【逻辑概括】：获取必要的组件引用并进行安全性自检。
   - 执行逻辑：
-    1. 【获取引用】：从自身或子物体中尝试获取 Animator 和 SpriteRenderer 实例。 
-    2. 【调试检查】：若关键组件（animator/spriteRenderer）为空，则输出警告日志以便开发者排查。 
+    1. 【组件获取】：获取同一物体上的 NPCMotor。[cite: 22]
+    2. 【子物体查找】：从子层级中查找并引用 Animator 和 SpriteRenderer。[cite: 22]
+    3. 【初始化】：将 lastPosition 初始化为当前坐标，防止首帧速度计算异常。[cite: 22]
 
 ■ 方法：Update() [Unity 回调]
-  - 【逻辑概括】：每帧执行动画同步逻辑。
   - 执行逻辑：
-    1. 【安全检查】：若 [agent] 或 [animator] 丢失，直接跳过逻辑以避免空指针报错。 
-    2. 【执行】：调用 [UpdateAnimation] 方法更新当前帧的动画状态。 
+    1. 【物理采样】：调用 CalculateManualVelocity() 计算本帧位移速度。[cite: 22]
+    2. 【安全校验】：若 Animator 为空则中断，防止空指针。[cite: 22]
+    3. 【动画驱动】：调用 UpdateAnimation() 执行同步。[cite: 22]
+
+■ 方法：CalculateManualVelocity()
+  - 【核心算法】：
+    - 计算公式：(当前位置 - 上一帧位置) / deltaTime。[cite: 22]
+    - 状态更新：更新 lastPosition 为当前位置，供下一帧使用。[cite: 22]
 
 ■ 方法：UpdateAnimation()
-  - 【逻辑概括】：核心同步逻辑，将物理位移信息映射为 2D 动画参数。
   - 执行逻辑：
-    1. 【速度计算】：提取 agent.velocity 的 X 与 Z 分量，计算出地面水平速度 [groundSpeed]。 
+    1. 【水平速率过滤】：仅计算 X-Z 平面的模长得到 groundSpeed。[cite: 22]
     2. 【运动分支处理】：
-       - **若处于移动状态 (groundSpeed > 0.1f)**：
-         - 【镜像翻转】：若 X 轴方向分量大于 0.1，根据其正负设置 spriteRenderer.flipX（向左为 true，向右为 false）。 
-         - 【参数映射】：将归一化的方向矢量 X 与 Z 分别传递给 Animator 的 "Horizontal" 与 "Vertical" 参数。 
-         - 【阈值判断】：根据 agent.speed 是否大于 3.0f 来决定目标动画强度（2.0f 为跑，1.0f 为走）。 
-       - **若处于静止状态**：
-         - 将 [targetValue] 设为 0。 
-    3. 【平滑处理】：使用 Mathf.MoveTowards 配合 [acceleration] 将 [currentAnimSpeed] 逼近目标值。 
-    4. 【结果更新】：调用 animator.SetFloat 更新最终的 "Speed" 混合树参数。 
+       - **若正在移动 (groundSpeed > 0.1f)**：
+         - 【镜像】：若 X 轴分量绝对值 > 0.1，则根据方向正负设置 flipX。[cite: 22]
+         - 【方向输入】：将方向矢量的 X 与 Z 直接同步至 Animator 混合树参数。[cite: 22]
+         - 【强度判定】：若速率 > 2.5f 判定为奔跑 (target=2.0f)，否则为行走 (target=1.0f)。[cite: 22]
+       - **若静止**：
+         - 目标动画速率 targetValue 设为 0。[cite: 22]
+    3. 【插值计算】：利用 Mathf.MoveTowards 逼近目标值。[cite: 22]
+    4. 【提交】：调用 animator.SetFloat 更新 "Speed" 参数。[cite: 22]
 
 [4. 依赖关系]
 --------------------------------------------------------------------------------
-- 强制依赖：同一 GameObject 必须包含 NavMeshAgent 组件。 
-- 结构要求：Animator 和 SpriteRenderer 需位于自身或层级结构的子物体中。 
-- 协作对象：依赖 Animator 控制器内部定义的参数（Speed, Horizontal, Vertical）。 
+- 依赖组件：同一 GameObject 需挂载 NPCMotor。[cite: 22]
+- 坐标系要求：基于世界坐标系 (Transform.position) 进行差分计算。 
+- Animator 参数：混合树必须包含 "Speed"、"Horizontal"、"Vertical" 三个 Float 参数。 
 
 ================================================================================
 END OF DOCUMENT

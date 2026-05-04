@@ -1,10 +1,9 @@
 using UnityEngine;
-using UnityEngine.AI;
 
-[RequireComponent(typeof(NavMeshAgent))]
+// 1. 删除了 [RequireComponent(typeof(NavMeshAgent))]，解除强制依赖
 public class NPCAnimationBridge : MonoBehaviour
 {
-    private NavMeshAgent agent;
+    private NPCMotor motor; // 引用新的位移组件
     private Animator animator;
     private SpriteRenderer spriteRenderer;
 
@@ -12,48 +11,64 @@ public class NPCAnimationBridge : MonoBehaviour
     public float acceleration = 10f;
     private float currentAnimSpeed = 0f;
 
+    // 用于通过位移计算速度
+    private Vector3 lastPosition;
+    private Vector3 currentVelocity;
+
     void Start()
     {
-        agent = GetComponent<NavMeshAgent>();
+        // 获取新的 Motor 组件
+        motor = GetComponent<NPCMotor>();
 
-        // 尝试从自身或子物体获取组件
         animator = GetComponentInChildren<Animator>();
         spriteRenderer = GetComponentInChildren<SpriteRenderer>();
 
-        // 调试检查：如果还是找不到，在控制台报警
         if (animator == null) Debug.LogWarning($"{gameObject.name} 找不到 Animator 组件！");
         if (spriteRenderer == null) Debug.LogWarning($"{gameObject.name} 找不到 SpriteRenderer 组件！");
+
+        lastPosition = transform.position;
     }
 
     void Update()
     {
-        // 安全检查：如果关键组件丢失，跳过逻辑，避免报错
-        if (agent == null || animator == null) return;
+        // 实时计算当前帧的物理速度
+        CalculateManualVelocity();
+
+        if (animator == null) return;
 
         UpdateAnimation();
     }
 
+    void CalculateManualVelocity()
+    {
+        // 通过位置差计算速度向量
+        Vector3 delta = transform.position - lastPosition;
+        currentVelocity = delta / Time.deltaTime;
+        lastPosition = transform.position;
+    }
+
     void UpdateAnimation()
     {
-        Vector3 velocity = agent.velocity;
-        float groundSpeed = new Vector3(velocity.x, 0, velocity.z).magnitude;
+        // 只看 X-Z 平面的移动速度
+        float groundSpeed = new Vector3(currentVelocity.x, 0, currentVelocity.z).magnitude;
 
         if (groundSpeed > 0.1f)
         {
-            Vector3 dir = velocity.normalized;
+            Vector3 dir = currentVelocity.normalized;
 
-            // 统一镜像逻辑：仅使用 flipX，不改 localScale
+            // 1. 处理镜像逻辑：通过速度方向决定朝向
             if (spriteRenderer != null && Mathf.Abs(dir.x) > 0.1f)
             {
                 spriteRenderer.flipX = (dir.x < 0);
             }
 
-            // 确保参数传递给混合树[cite: 5]
+            // 2. 传递混合树参数
             animator.SetFloat("Horizontal", dir.x);
             animator.SetFloat("Vertical", dir.z);
 
-            // 匹配速度阈值[cite: 1, 5]
-            float targetValue = (agent.speed > 3.0f) ? 2f : 1f;
+            // 3. 匹配速度阈值：直接根据实时 groundSpeed 判定
+            // 如果速度接近 motor 设置的 runSpeed (3.5)，则切换到 Run 状态 (2.0)
+            float targetValue = (groundSpeed > 2.5f) ? 2f : 1f;
             currentAnimSpeed = Mathf.MoveTowards(currentAnimSpeed, targetValue, Time.deltaTime * acceleration);
         }
         else

@@ -1,82 +1,70 @@
 ================================================================================
 【详细设计书】NPCMotor.cs
 ================================================================================
-版本：1.1
-模块：NPC 系统 - 移动执行与交互检测
+版本：2.0 (扇形探索与意图方向优化版)
+模块：NPC 系统 - 物理移动执行与路径意图控制
 文件：NPCMotor.cs 
 --------------------------------------------------------------------------------
 
 [1. 功能概要]
 --------------------------------------------------------------------------------
-本类负责驱动 NPC 在场景中的物理移动，并判定是否到达交互范围以触发特定逻辑。[cite: 25]
+本类负责驱动 NPC 的物理位移，并管理路径规划逻辑。[cite: 22] 
+相比旧版，本版本引入了“意图方向驱动”机制，解决了 NPC 在避障绕路后出现非预期大转弯的问题。[cite: 22]
 包含以下核心功能：
-- 导航控制：管理 NavMeshAgent 的寻路目标、速度及 2D 环境下的特殊配置。[cite: 25, 26]
-- 状态切换：根据大脑决策在“目标追踪”与“随机闲逛”模式间切换。[cite: 25, 26]
-- 交互判定：在接近目标点时，触发对应的数值更新（如进食）或物体交互（如摇树）。[cite: 26]
+- 物理位移执行：使用 Transform.MoveTowards 代替 Agent 自动寻路驱动，实现更精准的步进控制。[cite: 22]
+- 扇形意图探索：在 [-30°, 30°] 扇形范围内规划长距离路径，模拟具备方向感的探索行为。[cite: 22]
+- 绕路逻辑保护：区分“局部避障位移”与“大局探路意图”，确保导航连续性。[cite: 22]
+- 交互闭环：执行到达判定并触发进食、摇树等逻辑交互。[cite: 22]
 
 [2. 变量定义 (Constants & Variables)]
 --------------------------------------------------------------------------------
-■ 变量名：walkSpeed
+■ 变量名：walkSpeed / runSpeed
   - 类型：float
-  - 权限：public
-  - 默认值：2.0f
-  - 说明：基础移动速度，设置为模拟正常走路的步调。[cite: 25, 26]
+  - 说明：定义不同动作下的移动速率，闲逛使用 walkSpeed，探索/目标追踪使用 runSpeed。[cite: 22]
 
-■ 变量名：acceleration
-  - 类型：float
-  - 权限：public
-  - 默认值：4.0f
-  - 说明：移动加速度，用于控制 NPC 启动和停止时的平滑缓冲。[cite: 25, 26]
+■ 核心导航变量：
+  - explorationBaseDir (Vector3): 【新增】存储探路的大意图方向，不受局部绕路动作干扰。[cite: 22]
+  - lastForwardDirection (Vector3): 记录物理层面的最后移动向量。[cite: 22]
+  - waypoints (List<Vector3>): 存储由 NavMeshPath 计算出的拐点序列。[cite: 22]
 
 ■ 私有引用变量：
-  - agent (NavMeshAgent): 处理路径规划的核心组件。[cite: 25, 26]
-  - brain (NPCUtilityBrain): 获取当前决策目标的来源。[cite: 25, 26]
-  - needs (NPCNeeds): 用于在交互成功时调用 ApplyEat 接口修改生理数值。[cite: 26]
-  - anim (Animator): 关联的动画控制器组件。[cite: 25, 26]
+  - brain (NPCUtilityBrain): 提供当前的决策目标与动作名称。[cite: 22]
+  - needs (NPCNeeds): 交互成功后用于调用生理数值更新接口。[cite: 22]
 
 [3. 方法逻辑 (Methods)]
 --------------------------------------------------------------------------------
-■ 方法：Awake() [Unity 回调]
-  - 【逻辑概括】：初始化组件引用并配置适合 2D/顶视角表现的寻路参数。[cite: 25, 26]
+■ 方法：PlanNewPath(string action, GameObject target)
+  - 【逻辑概括】：根据决策类型计算目的地并生成拐点路径。[cite: 22]
   - 执行逻辑：
-    1. 【获取引用】：获取同一物体上的 Agent、Brain、Needs 和 Animator 实例。[cite: 25, 26]
-    2. 【2D 配置】：禁用 updateRotation 和 updateUpAxis，并将 angularSpeed 设为 0。[cite: 26]
-    3. 【初始化物理】：将 walkSpeed 与 acceleration 应用到 Agent 属性。[cite: 26]
+    1. 【探索意图逻辑】：若动作为“探索新区域”，则基于 explorationBaseDir 进行随机偏转。[cite: 22]
+       - 在正前方 [-30°, 30°] 范围内计算 searchDirection。
+       - 更新 explorationBaseDir 为新的 searchDirection 以作为下次迭代基准。
+    2. 【路径生成】：使用 NavMesh.CalculatePath 计算到目的地的多拐点路径，并存入 waypoints 列表。[cite: 22]
+    3. 【保底处理】：若路径无效，调用 FinishTask() 重置决策。[cite: 22]
 
-■ 方法：Update() [Unity 回调]
-  - 【逻辑概括】：每帧同步大脑目标并驱动寻路行为。[cite: 25, 26]
+■ 方法：ExecuteMovement(string action, GameObject target)
+  - 【逻辑概括】：逐点驱动 NPC 物理坐标更新。[cite: 22]
   - 执行逻辑：
-    1. 从 Brain 组件获取当前目标物体 targetObj。[cite: 26]
-    2. 【分支判断】：
-       - 若 targetObj 不为空：执行 MoveToTarget(targetObj) 指向目标，并执行 CheckInteraction(targetObj) 进行交互判定。[cite: 26]
-       - 若 targetObj 为空：执行 Wander() 进入低速巡逻状态。[cite: 26]
-
-■ 方法：MoveToTarget(GameObject target)
-  - 【逻辑概括】：更新寻路目标并根据目标类型动态设置停止距离。[cite: 25, 26]
-  - 执行逻辑：
-    1. 调用 agent.SetDestination 设置目标位置。[cite: 26]
-    2. 【距离调整】：若目标带有 "Tree" 标签，停止距离设为 1.8f；其他目标设为 0.4f。[cite: 26]
+    1. 【逐点移动】：依次移动向 waypoints 中的当前索引点，到达后索引递增。[cite: 22]
+    2. 【方向保护】：
+       - 若处于“探索”状态，禁止局部避障位移修改 lastForwardDirection，防止意图被污染。[cite: 22]
+       - 仅在非探索模式下允许实时更新移动方向记录。
+    3. 【末端驱动】：路径点走完后，若存在目标物体，则直接向目标物体位置步进。[cite: 22]
 
 ■ 方法：CheckInteraction(GameObject target)
-  - 【逻辑概括】：计算与目标的实时距离，满足范围要求时触发动作闭环。[cite: 26]
+  - 【逻辑概括】：基于标签（Tag）执行不同的交互逻辑判定。[cite: 22]
   - 执行逻辑：
-    1. 计算 NPC 与目标物体的 Vector3 距离 dist。[cite: 26]
-    2. 【判断】：若 dist <= agent.stoppingDistance + 0.3f 的容差范围。[cite: 26]
-    3. 【交互后果】：
-       - 若目标为 "Apple"：调用 needs.ApplyEat(20f) 恢复饥饿值，销毁物体并重置大脑。[cite: 26]
-       - 若目标为 "Tree"：检查并调用 TreeInteract.Interact()，重置大脑决策。[cite: 26]
-
-■ 方法：Wander()
-  - 【逻辑概括】：实现无目标时的随机点寻路游走。[cite: 25, 26]
-  - 执行逻辑：
-    1. 降低移动速度至 walkSpeed 的 70%，重置停止距离为 0。[cite: 26]
-    2. 【点生成】：路径计算完成后，在 2f 半径内生成随机偏移点，并应用到 3D 平面的 X/Z 轴坐标上。[cite: 26]
+    1. 【距离阈值】：树木 (Tree) 判定半径为 1.8f，苹果 (Apple) 为 0.8f。[cite: 22]
+    2. 【后果执行】：
+       - Apple: 调用 needs.ApplyEat(20f) 并销毁物体。[cite: 22]
+       - Tree: 触发 TreeInteract.Interact() 方法。[cite: 22]
+    3. 【闭环】：交互完成后调用 FinishTask()。[cite: 22]
 
 [4. 依赖关系]
 --------------------------------------------------------------------------------
-- 核心组件：必须挂载 NavMeshAgent 组件。[cite: 26]
-- 外部接口：依赖 NPCNeeds 的 ApplyEat(float) 方法进行数值反馈。[cite: 26]
-- 场景要求：树木和苹果需正确设置对应的 Tag 以及物理碰撞体。[cite: 26]
+- 环境依赖：场景需具备烘焙好的 NavMesh 数据以供路径计算。[cite: 22]
+- 组件耦合：强依赖同一物体上的 NPCUtilityBrain 获取 actionName。[cite: 22]
+- 资源配置：目标物体需正确配置 "Apple" 或 "Tree" 标签，且树木需挂载 TreeInteract 脚本。[cite: 22]
 
 ================================================================================
 END OF DOCUMENT
