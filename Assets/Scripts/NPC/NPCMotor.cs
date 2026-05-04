@@ -87,7 +87,7 @@ public class NPCMotor : MonoBehaviour
         // 修正：!agent.pathPending 确保路径计算完成[cite: 4]
         if (!agent.pathPending && agent.remainingDistance < 0.5f)
         {
-            Vector2 randomDir = Random.insideUnitCircle * 4f;
+            Vector2 randomDir = Random.insideUnitCircle * 2f;
             // 修正：将 Y 的随机值给到 Z 轴，匹配 3D 平面逻辑[cite: 3, 4]
             Vector3 wanderPos = transform.position + new Vector3(randomDir.x, 0, randomDir.y);
             agent.SetDestination(wanderPos);

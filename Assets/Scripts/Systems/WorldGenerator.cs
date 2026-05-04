@@ -4,25 +4,30 @@ public class WorldGenerator : MonoBehaviour
 {
     public GameObject treePrefab;
     public int treeCount = 50;
-    public Vector2 spawnRange = new Vector2(50, 50);
+
+    // 引用你的地面物体
+    public Transform groundTransform;
 
     void Start() => GenerateWorld();
 
     void GenerateWorld()
     {
-        // 创建一个父物体以便管理 Hierarchy
         GameObject treeContainer = new GameObject("Trees");
+
+        // 自动获取地面的缩放值作为参考范围
+        // 如果是 Plane，基础大小是 10x10，所以半径是 scale * 5
+        float rangeX = groundTransform.localScale.x * 5f;
+        float rangeZ = groundTransform.localScale.z * 5f;
 
         for (int i = 0; i < treeCount; i++)
         {
             Vector3 randomPos = new Vector3(
-                Random.Range(-spawnRange.x, spawnRange.x),
+                Random.Range(-rangeX, rangeX),
                 0,
-                Random.Range(-spawnRange.y, spawnRange.y)
+                Random.Range(-rangeZ, rangeZ)
             );
 
-            GameObject tree = Instantiate(treePrefab, randomPos, Quaternion.identity, treeContainer.transform);
-            tree.name = $"Tree_{i}"; // 给予唯一名称方便调试
+            Instantiate(treePrefab, randomPos, Quaternion.identity, treeContainer.transform);
         }
     }
 }
