@@ -25,24 +25,31 @@ public class NPCMotor : MonoBehaviour
 
     void Update()
     {
-        // 1. 实时标记地图
         if (ExplorationMap.Instance != null)
             ExplorationMap.Instance.MarkAsVisited(transform.position, visionRadius);
 
         GameObject targetObj = brain.GetCurrentTarget();
-        string action = brain.currentAction.actionName;
+        string action = (brain.currentAction.actionName != null) ? brain.currentAction.actionName : "";
 
-        // 2. 核心逻辑：如果我们正在“探索”，但当前脚下已经涂过了，就考虑重新规划
-        if (action.Contains("探索") && targetObj == null)
+        // 核心优化：针对探索/寻找行为的“趋势感知”重规划[cite: 7]
+        if ((action.Contains("探索") || action.Contains("寻找")) && targetObj == null && waypoints.Count > 0)
         {
-            // 如果离目的地很近了，或者当前位置已经探索完毕，强制重新找点
-            if (Vector3.Distance(transform.position, waypoints[waypoints.Count - 1]) < 2f)
+            Vector3 finalDest = waypoints[waypoints.Count - 1];
+
+            // 1. 目的地校验：如果目的地已经落入红区，立即寻找新的迷雾方向[cite: 7]
+            if (ExplorationMap.Instance.IsVisited(finalDest))
+            {
+                PlanNewPath(action, null);
+            }
+
+            // 2. 提前评估：距离终点 4f（略大于视野边界）时，提前计算下一个高密度未探知区域[cite: 7]
+            // 这能让 NPC 的移动轨迹更连贯，始终朝着迷雾最浓的方向走
+            if (Vector3.Distance(transform.position, finalDest) < 4f)
             {
                 PlanNewPath(action, null);
             }
         }
 
-        // 状态切换检测（保持不变）
         if (action != currentExecutingAction || targetObj != currentExecutingTarget)
         {
             PlanNewPath(action, targetObj);
@@ -64,10 +71,14 @@ public class NPCMotor : MonoBehaviour
         {
             destination = target.transform.position;
         }
-        else if (action.Contains("探索") || action.Contains("寻找"))
+        else if (action.Contains("探索") || action.Contains("寻找") || action.Contains("觅"))
         {
-            // 向地图系统申请未探索点
+            // 向地图系统申请未探索点（现在逻辑已改为在视野边缘外探测最高密度区）[cite: 7]
             destination = ExplorationMap.Instance.GetUnexploredPoint(transform.position, 35f);
+
+            // 强化版调试蓝线：保持 5 秒，方便查看选定的迷雾目标[cite: 7]
+            Debug.DrawLine(transform.position, destination, Color.blue, 5f);
+            Debug.DrawRay(destination, Vector3.up * 10f, Color.blue, 5f);
         }
         else
         {
@@ -91,6 +102,8 @@ public class NPCMotor : MonoBehaviour
         {
             Vector3 targetPoint = waypoints[currentWaypointIndex];
             targetPoint.y = transform.position.y;
+
+            // 关键：绝对不修改 Transform 的 Scale 或 Rotation，防止 NPC 变形[cite: 7]
             transform.position = Vector3.MoveTowards(transform.position, targetPoint, speed * Time.deltaTime);
             if (Vector3.Distance(transform.position, targetPoint) < 0.2f) currentWaypointIndex++;
         }
@@ -116,12 +129,9 @@ public class NPCMotor : MonoBehaviour
 
     void FinishTask() { currentExecutingAction = ""; currentExecutingTarget = null; brain.ResetAction(); }
 
-    // --- 在 Scene 视图绘制 12f 的感知圆圈 ---
     void OnDrawGizmos()
     {
         Gizmos.color = (needs != null && needs.hunger < 60f) ? Color.red : Color.green;
-
-        // 绘制感知圆圈线框
         Vector3 center = transform.position + Vector3.up * 0.1f;
         float segments = 32;
         float angle = 0f;
