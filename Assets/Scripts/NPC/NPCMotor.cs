@@ -2,20 +2,26 @@ using UnityEngine;
 using UnityEngine.AI;
 using System.Collections.Generic;
 
+// 确保物体上有 LineRenderer 组件
+[RequireComponent(typeof(LineRenderer))]
 public class NPCMotor : MonoBehaviour
 {
     private NPCUtilityBrain brain;
     private NPCNeeds needs;
+    private LineRenderer lineRenderer;
 
     [Header("移动设置")]
     public float walkSpeed = 2.0f;
-    public float runSpeed = 4.0f; // 跑速已调高
+    public float runSpeed = 4.0f;
+
+    [Header("可视化设置")]
+    public float visionRadius = 12f; // 你的感知范围[cite: 11]
+    public Color circleColor = Color.green;
 
     private List<Vector3> waypoints = new List<Vector3>();
     private int currentWaypointIndex = 0;
     private string currentExecutingAction;
     private GameObject currentExecutingTarget;
-
     private Vector3 explorationBaseDir = Vector3.forward;
 
     void Awake()
@@ -23,14 +29,43 @@ public class NPCMotor : MonoBehaviour
         brain = GetComponent<NPCUtilityBrain>();
         needs = GetComponent<NPCNeeds>();
         explorationBaseDir = transform.forward;
+
+        // 初始化可视化圆圈
+        InitVisionCircle();
+    }
+
+    void InitVisionCircle()
+    {
+        lineRenderer = GetComponent<LineRenderer>();
+        lineRenderer.useWorldSpace = false; // 关键：随 NPC 移动[cite: 11]
+        lineRenderer.startWidth = 0.15f;
+        lineRenderer.endWidth = 0.15f;
+        lineRenderer.positionCount = 51; // 50段实现平滑圆弧
+        lineRenderer.startColor = circleColor;
+        lineRenderer.endColor = circleColor;
+
+        // 预先计算圆圈坐标（局部坐标系）
+        for (int i = 0; i <= 50; i++)
+        {
+            float angle = i * (2 * Mathf.PI / 50);
+            float x = Mathf.Cos(angle) * visionRadius;
+            float z = Mathf.Sin(angle) * visionRadius;
+            lineRenderer.SetPosition(i, new Vector3(x, 0.1f, z)); // 稍微抬高 0.1f 防止跟地面闪烁
+        }
     }
 
     void Update()
     {
+        // 实时更新颜色（比如饿了变红）
+        if (needs != null)
+        {
+            lineRenderer.startColor = needs.hunger < 60f ? Color.red : circleColor;
+            lineRenderer.endColor = lineRenderer.startColor;
+        }
+
         GameObject targetObj = brain.GetCurrentTarget();
         string action = brain.currentAction.actionName;
 
-        // 如果目标在外部被销毁，强制重置执行状态
         if (currentExecutingTarget == null && targetObj != null)
         {
             currentExecutingAction = "";
@@ -51,6 +86,9 @@ public class NPCMotor : MonoBehaviour
         }
     }
 
+    // --- 以下逻辑保持 PlanNewPath, ExecuteMovement, CheckInteraction, FinishTask 不变 ---
+    // (参考之前的代码版本)
+
     void PlanNewPath(string action, GameObject target)
     {
         waypoints.Clear();
@@ -61,10 +99,9 @@ public class NPCMotor : MonoBehaviour
         {
             destination = target.transform.position;
         }
-        else if (action.Contains("探索") || action.Contains("寻找")) // 模糊匹配
+        else if (action.Contains("探索") || action.Contains("寻找"))
         {
             float angleRange = (Random.value > 0.85f) ? 30f : 5f;
-            // --- 修正后的行 ---
             float randomAngle = Random.Range(-angleRange, angleRange);
             explorationBaseDir = Quaternion.Euler(0, randomAngle, 0) * explorationBaseDir;
             destination = transform.position + explorationBaseDir * Random.Range(50f, 80f);
@@ -90,7 +127,6 @@ public class NPCMotor : MonoBehaviour
 
     void ExecuteMovement(string action, GameObject target)
     {
-        // 核心速度逻辑：根据饥饿值或是否有目标强制切换跑速
         float speed = (target != null || (needs != null && needs.hunger < 60f)) ? runSpeed : walkSpeed;
 
         if (currentWaypointIndex < waypoints.Count)
@@ -121,12 +157,11 @@ public class NPCMotor : MonoBehaviour
     {
         if (target == null) return;
         float dist = Vector3.Distance(transform.position, target.transform.position);
-        float limit = target.CompareTag("Tree") ? 2.0f : 1.0f; // 宽松判定
+        float limit = target.CompareTag("Tree") ? 2.0f : 1.0f;
 
         if (dist <= limit)
         {
             bool interactionDone = false;
-
             if (target.CompareTag("Apple"))
             {
                 needs.ApplyEat(20f);
@@ -142,12 +177,8 @@ public class NPCMotor : MonoBehaviour
                     tree.Interact();
                     interactionDone = true;
                 }
-                else
-                {
-                    interactionDone = true;
-                }
+                else interactionDone = true;
             }
-
             if (interactionDone) FinishTask();
         }
     }
