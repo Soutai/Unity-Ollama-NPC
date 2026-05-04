@@ -62,7 +62,7 @@ public class NPCMotor : MonoBehaviour
         {
             if (target.CompareTag("Apple"))
             {
-                needs.Eat(20f); 
+                needs.ApplyEat(20f); 
                 Destroy(target);
                 brain.ResetAction();
             }
@@ -73,7 +73,6 @@ public class NPCMotor : MonoBehaviour
                 {
                     tree.Interact(); 
                 }
-                needs.Eat(2f);
                 brain.ResetAction();
             }
         }

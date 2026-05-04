@@ -3,43 +3,39 @@ using System.Collections.Generic;
 
 public class NPCNeeds : MonoBehaviour
 {
-    [Header("欲望指标 (0-100)")]
-    public float hunger = 100f;
+    [Header("生理数值")]
+    public float hunger = 100.0f;
     public float hungerDecayRate = 1.2f;
-    [Header("感知设置")]
-    public float sightRange = 12f;
-    public LayerMask interactableLayers; // 在 Inspector 勾选包含 Apple 和 Tree 的层级（比如 Default 和 Tree）
+
+    [Header("感官设置")]
+    public float sightRange = 12.0f;
+    public LayerMask interactableLayers;
+
+    [Header("UI 状态描述")]
+    // 由决策大脑实时更新，供右下角 UI 读取
+    public string currentAction = "初始化...";
 
     void Update()
     {
-        if (hunger > 0) hunger -= hungerDecayRate * Time.deltaTime;
+        // 持续消耗饥饿值[cite: 8, 10]
+        if (hunger > 0)
+        {
+            hunger -= hungerDecayRate * Time.deltaTime;
+        }
     }
 
-    // 感官：扫描指定层级内的物体
+    // 被动接口：仅由 Behavior 类在确认碰撞正确后调用[cite: 8]
+    public void ApplyEat(float amount)
+    {
+        hunger = Mathf.Clamp(hunger + amount, 0, 100);
+    }
+
+    // 感官接口：供 Brain 类调用以获取决策素材[cite: 8, 10]
     public List<GameObject> GetNearbyObjects()
     {
         List<GameObject> detected = new List<GameObject>();
-        // 强制使用 3D 扫描（如果你用的是 Sphere Collider）
         Collider[] hits = Physics.OverlapSphere(transform.position, sightRange, interactableLayers);
-
-        if (hits.Length == 0)
-        {
-            // 如果雷达空了，在控制台报个信
-            // Debug.Log("雷达扫描中... 但附近啥也没摸着"); 
-        }
-        else
-        {
-            foreach (var hit in hits)
-            {
-                Debug.Log("雷达发现目标：" + hit.gameObject.name + " Tag是：" + hit.tag);
-                detected.Add(hit.gameObject);
-            }
-        }
+        foreach (var hit in hits) { detected.Add(hit.gameObject); }
         return detected;
-    }
-
-    public void Eat(float amount)
-    {
-        hunger = Mathf.Clamp(hunger + amount, 0, 100);
     }
 }

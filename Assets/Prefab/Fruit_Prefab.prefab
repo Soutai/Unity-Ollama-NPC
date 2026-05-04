@@ -155,8 +155,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4d5cc214bd91cec449e21eb8f819af22, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::FruitItem
-  nutrition: 20
-  pickupRadius: 0.8
+  nutrition: 25
 --- !u!114 &7934289649664189153
 MonoBehaviour:
   m_ObjectHideFlags: 0

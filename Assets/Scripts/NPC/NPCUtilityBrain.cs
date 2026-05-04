@@ -15,103 +15,46 @@ public class NPCUtilityBrain : MonoBehaviour
     private NPCNeeds needs;
     public ActionChoice currentAction;
 
-    [TextArea(3, 5)]
-    public string currentThought;
-
     void Start()
     {
         needs = GetComponent<NPCNeeds>();
-        ResetAction();
-        InvokeRepeating("Think", 0f, 0.5f);
+        InvokeRepeating("Think", 0f, 0.5f); // 每 0.5 秒思考一次[cite: 2, 10]
     }
 
     void Think()
     {
-        // 1. 默认：随便逛逛
-        ActionChoice best = new ActionChoice
-        {
-            actionName = "随便逛逛",
-            score = 10.0f,
-            target = null,
-            motive = "肚子还不饿，到处走走"
-        };
+        ActionChoice best = new ActionChoice { actionName = "闲逛", score = 10f, motive = "现在不饿" };
 
-        // 2. 只有饥饿度低于 60 才会考虑寻找食物
-        bool isHungryEnough = needs.hunger < 60f;
-
-        if (isHungryEnough)
+        if (needs.hunger < 60f) // 触发寻找食物的阈值[cite: 2, 10]
         {
             List<GameObject> nearby = needs.GetNearbyObjects();
-
             foreach (GameObject obj in nearby)
             {
                 if (obj == null) continue;
-                float score = 0;
-
-                if (obj.CompareTag("Apple"))
+                float score = CalculateScore(obj);
+                if (score > best.score)
                 {
-                    // 饥饿度越低，分值越高
-                    score = 50f + (100f - needs.hunger);
-                    if (score > best.score)
+                    best = new ActionChoice
                     {
-                        best = new ActionChoice
-                        {
-                            actionName = "去捡苹果",
-                            score = score,
-                            target = obj,
-                            motive = "有点饿了，去吃苹果"
-                        };
-                    }
-                }
-                else if (obj.CompareTag("Tree"))
-                {
-                    TreeInteract tree = obj.GetComponent<TreeInteract>();
-                    if (tree != null && tree.hasApples)
-                    {
-                        score = 30f + (100f - needs.hunger) * 0.5f;
-                        if (score > best.score)
-                        {
-                            best = new ActionChoice
-                            {
-                                actionName = "去摇树",
-                                score = score,
-                                target = obj,
-                                motive = "存点粮食，以防万一"
-                            };
-                        }
-                    }
+                        actionName = obj.CompareTag("Apple") ? "去捡苹果" : "去摇树",
+                        score = score,
+                        target = obj,
+                        motive = "肚子饿了，去找点吃的"
+                    };
                 }
             }
         }
-        else
-        {
-            // 如果不饿，强制保持动机为“不饿”
-            best.motive = "现在不饿，不用找食物";
-        }
-
         currentAction = best;
-        UpdateDisplay(best);
+        needs.currentAction = best.motive; // 同步给 Needs 供 UI 显示[cite: 10]
     }
 
-    void UpdateDisplay(ActionChoice choice)
+    float CalculateScore(GameObject obj)
     {
-        currentThought = $"原因: {choice.motive}\n" +
-                         $"分值: {choice.score:F1}\n" +
-                         $"行动: {choice.actionName}";
+        if (obj.CompareTag("Apple")) return 50f + (100f - needs.hunger);
+        if (obj.CompareTag("Tree")) return 30f + (100f - needs.hunger) * 0.5f;
+        return 0;
     }
 
-    public void ResetAction()
-    {
-        ActionChoice idle = new ActionChoice
-        {
-            actionName = "闲逛中",
-            score = 10.0f,
-            target = null,
-            motive = "刚忙完，休息一下"
-        };
-        currentAction = idle;
-        UpdateDisplay(idle);
-    }
-
+    public void ResetAction() { currentAction = new ActionChoice { actionName = "闲逛", score = 10f }; }
     public GameObject GetCurrentTarget() => currentAction.target;
 }
