@@ -84,8 +84,24 @@ public class ExplorationMap : MonoBehaviour
     public Vector2Int WorldToGrid(Vector3 pos) => new Vector2Int(Mathf.RoundToInt(pos.x / gridSize), Mathf.RoundToInt(pos.z / gridSize));
     public Vector3 GridToWorld(Vector2Int grid) => new Vector3(grid.x * gridSize, 0, grid.y * gridSize);
 
+    // 1. 负责统一指挥画什么
     void OnDrawGizmos()
     {
+        // 核心修正：判断 NPC 是否已注册，只有注册了才画跟随 NPC 的圈
+        if (npcTransform == null) return;
+
+        // 使用 npcTransform.position 替代原来的 transform.position
+        Vector3 currentPos = npcTransform.position;
+
+        // 绘制 12f 视线圈（绿色）- 现在会跟随 NPC 移动
+        Gizmos.color = Color.green;
+        DrawCircleGizmo(currentPos, 12f);
+
+        // 绘制 16f 探测圈（蓝色）- 现在会跟随 NPC 移动
+        Gizmos.color = Color.blue;
+        DrawCircleGizmo(currentPos, 16f);
+
+        // 绘制已探索区域（红色网格）
         if (visitedGrids != null)
         {
             Gizmos.color = new Color(1, 0, 0, 0.1f);
@@ -93,9 +109,8 @@ public class ExplorationMap : MonoBehaviour
                 Gizmos.DrawCube(GridToWorld(grid), new Vector3(gridSize, 0.1f, gridSize));
         }
 
-        // 核心修正：使用 npcTransform.position 实现实时跟随显示
-        if (npcTransform == null || debugSamples.Count == 0) return;
-        Vector3 currentPos = npcTransform.position;
+        // 绘制扫描射线（采样热力图）
+        if (debugSamples.Count == 0) return;
 
         foreach (var sample in debugSamples)
         {
@@ -106,6 +121,20 @@ public class ExplorationMap : MonoBehaviour
             Vector3 end = currentPos + sample.dir * 16f;
             Gizmos.DrawLine(start, end);
             if (sample.score > 0) Gizmos.DrawSphere(end, 0.1f * sample.score);
+        }
+    }
+
+    // 2. 纯粹的工具函数：只负责画圆
+    void DrawCircleGizmo(Vector3 center, float radius)
+    {
+        float segments = 64;
+        Vector3 lastPos = center + new Vector3(radius, 0, 0);
+        for (int i = 1; i <= segments; i++)
+        {
+            float angle = i * 2 * Mathf.PI / segments;
+            Vector3 nextPos = center + new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+            Gizmos.DrawLine(lastPos, nextPos);
+            lastPos = nextPos;
         }
     }
 }
