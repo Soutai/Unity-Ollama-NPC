@@ -26,24 +26,40 @@ public class NPCMotor : MonoBehaviour
         if (ExplorationMap.Instance != null)
             ExplorationMap.Instance.RegisterNPC(this.transform);
     }
-
     void Update()
     {
         if (ExplorationMap.Instance != null)
             ExplorationMap.Instance.MarkAsVisited(transform.position, visionRadius);
 
+        // --- 核心修改：实时感知与记忆录入 ---
+        // 扫描视野内的物体，如果是树就存入记忆
+        Collider[] colliders = Physics.OverlapSphere(transform.position, visionRadius);
+        foreach (var col in colliders)
+        {
+            if (col.CompareTag("Tree"))
+                GetComponent<NPCMemory>().RecordTree(col.gameObject);
+        }
+
         GameObject targetObj = brain.GetCurrentTarget();
 
-        // --- 核心修复：目标切换检测 ---
-        // 如果这一帧的目标和上一帧不一样（比如从 null 变成了苹果），立即重新规划路径[cite: 13, 17]
+        // 目标切换检测[cite: 16]
         if (targetObj != lastTarget && targetObj != null)
         {
             PlanNewPath(brain.currentAction.actionName, targetObj);
         }
-        lastTarget = targetObj; 
-        
-        // 更新记录
-        // ----------------------------
+        lastTarget = targetObj;
+
+        // --- 核心修改：目标动态失效监测 ---
+        // 如果正在去某棵树，但树上的果子被别人摘光了，立即重置动作
+        if (targetObj != null && targetObj.CompareTag("Tree"))
+        {
+            TreeInteract tree = targetObj.GetComponent<TreeInteract>();
+            if (tree != null && !tree.hasApples)
+            {
+                brain.ResetAction(); // 强制大脑重新 Think[cite: 19]
+                waypoints.Clear();   // 停止移动
+            }
+        }
 
         if (targetObj == null)
         {

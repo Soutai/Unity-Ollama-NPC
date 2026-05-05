@@ -28,18 +28,12 @@ public class NPCUtilityBrain : MonoBehaviour
     void Think()
     {
         // ================== 核心修改：行为锁定策略 ==================
-        // 1. 检查是否正在执行“长距离执行”动作
         bool isExecutingLongTask = (currentAction.actionName == "探索新区域" ||
                                     currentAction.actionName == "去捡苹果" ||
                                     currentAction.actionName == "去摇树");
 
-        // 2. 如果正在执行任务，且 Motor 还没通过 ResetAction() 清除它
         if (isExecutingLongTask && !string.IsNullOrEmpty(currentAction.actionName))
         {
-            // 策略：排除杂念，纯粹探路。
-            // 除非是极其紧急的情况（例如饥饿度掉到临界点且附近有直接能吃的苹果），否则不准打断。
-
-            // 紧急任务检查：如果还没捡到苹果，但路边突然出现一个苹果
             List<GameObject> nearby = needs.GetNearbyObjects();
             bool foundInstantApple = false;
             foreach (GameObject obj in nearby)
@@ -50,15 +44,12 @@ public class NPCUtilityBrain : MonoBehaviour
                     break;
                 }
             }
-
-            // 如果没发现更紧急的即时食物，直接退出 Think，让 Motor 继续跑完当前路径
             if (!foundInstantApple) return;
         }
         // ============================================================
 
         string currentStatusText = (needs.hunger < 60f) ? "饿了，正在寻找食物..." : "现在不饿";
 
-        // 只有在闲逛或探索时才更新基础状态文本
         if (currentAction.actionName == "闲逛" || currentAction.actionName == "探索新区域")
         {
             needs.currentAction = currentStatusText;
@@ -71,15 +62,30 @@ public class NPCUtilityBrain : MonoBehaviour
             List<GameObject> nearby = needs.GetNearbyObjects();
             if (nearby.Count == 0)
             {
-                // 如果正在探索，不重复发指令，由上面的锁定机制控制
-                best = new ActionChoice { actionName = "探索新区域", score = 20f, motive = "附近没吃的，去远处看看" };
+                // --- 核心修改：记忆检索逻辑 ---
+                // 如果附近没看到的，先问记忆系统有没有知道的果树[cite: 21]
+                GameObject rememberedTree = GetComponent<NPCMemory>().GetBestRememberedTree();
+                if (rememberedTree != null)
+                {
+                    best = new ActionChoice
+                    {
+                        actionName = "去摇树",
+                        score = 35f, // 优先级：直接捡苹果 > 摇记忆中的树 > 盲目探索[cite: 19]
+                        target = rememberedTree,
+                        motive = "去记忆中的果树看看"
+                    };
+                }
+                else
+                {
+                    best = new ActionChoice { actionName = "探索新区域", score = 20f, motive = "附近没吃的，记忆里也没有，去远处看看" };
+                }
             }
             else
             {
                 foreach (GameObject obj in nearby)
                 {
                     float score = CalculateScore(obj);
-                    if (obj == currentAction.target) score += PERSISTENCE_BONUS; //[cite: 19]
+                    if (obj == currentAction.target) score += PERSISTENCE_BONUS;
 
                     if (score > best.score)
                     {
@@ -95,7 +101,6 @@ public class NPCUtilityBrain : MonoBehaviour
             }
         }
 
-        // 仅当新决策分值更高时才更新[cite: 19]
         if (best.score > lastDecisionScore || lastDecisionScore == 0)
         {
             currentAction = best;

@@ -1914,7 +1914,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5f9391ebfa38f90489934bf569308c67, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ExplorationMap
-  cellSize: 2.5
+  gridSize: 1
 --- !u!1 &1300171312
 GameObject:
   m_ObjectHideFlags: 0
@@ -2566,6 +2566,7 @@ GameObject:
   - component: {fileID: 2010233090}
   - component: {fileID: 2010233089}
   - component: {fileID: 2010233091}
+  - component: {fileID: 2010233092}
   m_Layer: 0
   m_Name: Player_AI
   m_TagString: Player_AI
@@ -2711,8 +2712,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NPCMotor
   walkSpeed: 2
-  runSpeed: 3.5
+  runSpeed: 3
   visionRadius: 12
+  detectionRadius: 16
 --- !u!114 &2010233087
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2805,6 +2807,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NPCAnimationBridge
   acceleration: 10
+--- !u!114 &2010233092
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2010233074}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 431a0524b32c0f04db7d3fa87de93f3c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NPCMemory
+  knownTrees: []
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
