@@ -5,167 +5,77 @@ using System.Collections.Generic;
 public class NPCMotor : MonoBehaviour
 {
     private NPCUtilityBrain brain;
-    private NPCNeeds needs;
-
-    [Header("移动速度")]
     public float walkSpeed = 2.0f;
-    public float runSpeed = 4.0f;
-
-    [Header("感知半径设定")]
-    public float visionRadius = 12f;      // 红色视线圈
-    public float detectionRadius = 16f;   // 蓝色探测近圈
-    public float farLookRadius = 24f;     // 深蓝色远眺圈（确保能跳出红区）
+    public float visionRadius = 12f;
+    public float detectionRadius = 16f;
 
     private List<Vector3> waypoints = new List<Vector3>();
     private int currentWaypointIndex = 0;
-    private string currentExecutingAction;
-    private GameObject currentExecutingTarget;
 
     void Awake()
     {
         brain = GetComponent<NPCUtilityBrain>();
-        needs = GetComponent<NPCNeeds>();
+    }
+
+    void Start()
+    {
+        // 修正点：将自己注册给地图，让方向圈实时跟随[cite: 10]
+        if (ExplorationMap.Instance != null)
+            ExplorationMap.Instance.RegisterNPC(this.transform);
     }
 
     void Update()
     {
-        // 1. 实时标记已探索区域
         if (ExplorationMap.Instance != null)
             ExplorationMap.Instance.MarkAsVisited(transform.position, visionRadius);
 
-        GameObject targetObj = brain.GetCurrentTarget();
         string action = (brain.currentAction.actionName != null) ? brain.currentAction.actionName : "";
+        GameObject targetObj = brain.GetCurrentTarget();
 
-        // 2. 探索重规划：目的地不再是“迷雾区”或者快走到了，就立即刷新航向
-        if ((action.Contains("探索") || action.Contains("寻找")) && targetObj == null && waypoints.Count > 0)
+        // 核心修正：只要没目标（比如处于“不饿”闲逛状态），就强制进行环带探索[cite: 9]
+        if (targetObj == null)
         {
-            Vector3 finalDest = waypoints[waypoints.Count - 1];
-            // 提高灵敏度：距离终点 6f 时就开始寻找下一片绿地
-            if (ExplorationMap.Instance.IsVisited(finalDest) || Vector3.Distance(transform.position, finalDest) < 6f)
+            if (waypoints.Count == 0)
             {
-                PlanNewPath(action, null);
+                PlanNewPath("探索", null);
+            }
+            else
+            {
+                // 如果终点已经被探索过了，或者快走到了，提前换个方向[cite: 9]
+                Vector3 dest = waypoints[waypoints.Count - 1];
+                if (ExplorationMap.Instance.IsVisited(dest) || Vector3.Distance(transform.position, dest) < 4f)
+                {
+                    PlanNewPath("探索", null);
+                }
             }
         }
 
-        // 3. 状态变更检测
-        if (action != currentExecutingAction || targetObj != currentExecutingTarget)
-        {
-            PlanNewPath(action, targetObj);
-            currentExecutingAction = action;
-            currentExecutingTarget = targetObj;
-        }
-
-        ExecuteMovement(targetObj);
-        if (targetObj != null) CheckInteraction(targetObj);
+        ExecuteMovement();
     }
-
-    // --- NPCMotor.cs 修正部分 ---
 
     void PlanNewPath(string action, GameObject target)
     {
         waypoints.Clear();
         currentWaypointIndex = 0;
-        Vector3 destination = transform.position;
+        Vector3 dest = (target != null) ? target.transform.position :
+                       ExplorationMap.Instance.GetUnexploredPoint(transform.position, detectionRadius);
 
-        if (target != null)
-        {
-            destination = target.transform.position;
-        }
-        else if (action.Contains("探索") || action.Contains("寻找") || action.Contains("觅"))
-        {
-            destination = ExplorationMap.Instance.GetUnexploredPoint(transform.position, detectionRadius);
-
-            // 强保：将采样点严丝合缝地贴合到最近的 NavMesh 面上
-            NavMeshHit hit;
-            if (NavMesh.SamplePosition(destination, out hit, 10.0f, NavMesh.AllAreas))
-            {
-                destination = hit.position;
-            }
-            Debug.DrawLine(transform.position, destination, Color.blue, 3f);
-        }
-        else
-        {
-            Vector2 rnd = Random.insideUnitCircle * 10f;
-            destination = transform.position + new Vector3(rnd.x, 0, rnd.y);
-        }
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(dest, out hit, 10.0f, NavMesh.AllAreas)) dest = hit.position;
 
         NavMeshPath path = new NavMeshPath();
-        if (NavMesh.CalculatePath(transform.position, destination, NavMesh.AllAreas, path))
+        if (NavMesh.CalculatePath(transform.position, dest, NavMesh.AllAreas, path))
         {
-            // 只有路径合法时才添加航点
-            if (path.status != NavMeshPathStatus.PathInvalid)
-            {
-                waypoints.AddRange(path.corners);
-            }
-        }
-
-        // --- 修正点：移除了之前强制 Add(destination) 的保底代码 ---
-        // 那个代码会导致 NPC 忽略 NavMesh 直接直线穿墙或出界
-
-        if (waypoints.Count == 0 && target == null) FinishTask();
-    }
-
-    void ExecuteMovement(GameObject target)
-    {
-        float speed = (target != null || (needs != null && needs.hunger < 60f)) ? runSpeed : walkSpeed;
-
-        if (currentWaypointIndex < waypoints.Count)
-        {
-            Vector3 targetPoint = waypoints[currentWaypointIndex];
-            targetPoint.y = transform.position.y;
-
-            // 保持原始缩放，仅进行位置平移
-            transform.position = Vector3.MoveTowards(transform.position, targetPoint, speed * Time.deltaTime);
-            if (Vector3.Distance(transform.position, targetPoint) < 0.2f) currentWaypointIndex++;
-        }
-        else if (target != null)
-        {
-            transform.position = Vector3.MoveTowards(transform.position, target.transform.position, speed * Time.deltaTime);
-        }
-        else FinishTask();
-    }
-
-    void CheckInteraction(GameObject target)
-    {
-        float dist = Vector3.Distance(transform.position, target.transform.position);
-        float limit = target.CompareTag("Tree") ? 2.0f : 1.0f;
-
-        if (dist <= limit)
-        {
-            if (target.CompareTag("Apple")) { needs.ApplyEat(20f); Destroy(target); }
-            else if (target.CompareTag("Tree")) { var tree = target.GetComponent<TreeInteract>(); if (tree != null) tree.Interact(); }
-            FinishTask();
+            if (path.status != NavMeshPathStatus.PathInvalid) waypoints.AddRange(path.corners);
         }
     }
 
-    void FinishTask() { currentExecutingAction = ""; currentExecutingTarget = null; brain.ResetAction(); }
-
-    void OnDrawGizmos()
+    void ExecuteMovement()
     {
-        // 1. 绘制 12f 视线圈（绿色/红色表示饥饿状态）
-        Gizmos.color = (needs != null && needs.hunger < 60f) ? Color.red : Color.green;
-        DrawCircleGizmo(transform.position, visionRadius);
-
-        // 2. 绘制 16f 探测近圈（蓝色）
-        Gizmos.color = Color.blue;
-        DrawCircleGizmo(transform.position, detectionRadius);
-
-        // 3. 绘制 24f 远眺圈（浅蓝色）
-        // 这个圈负责捕捉红区外的远端绿地
-        Gizmos.color = new Color(0, 0.5f, 1f, 0.5f);
-        DrawCircleGizmo(transform.position, farLookRadius);
-    }
-
-    void DrawCircleGizmo(Vector3 center, float radius)
-    {
-        float segments = 64;
-        Vector3 lastPos = center + new Vector3(radius, 0, 0);
-        for (int i = 1; i <= segments; i++)
-        {
-            float angle = i * 2 * Mathf.PI / segments;
-            Vector3 nextPos = center + new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
-            Gizmos.DrawLine(lastPos, nextPos);
-            lastPos = nextPos;
-        }
+        if (currentWaypointIndex >= waypoints.Count) return;
+        Vector3 targetPoint = waypoints[currentWaypointIndex];
+        targetPoint.y = transform.position.y;
+        transform.position = Vector3.MoveTowards(transform.position, targetPoint, walkSpeed * Time.deltaTime);
+        if (Vector3.Distance(transform.position, targetPoint) < 0.2f) currentWaypointIndex++;
     }
 }

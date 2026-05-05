@@ -5,20 +5,23 @@ using UnityEngine.AI;
 public class ExplorationMap : MonoBehaviour
 {
     public static ExplorationMap Instance;
-
     public float gridSize = 1.0f;
     private Dictionary<Vector2Int, bool> visitedGrids = new Dictionary<Vector2Int, bool>();
 
-    void Awake()
-    {
-        Instance = this;
-    }
+    // 调试数据
+    private struct SampleDebug { public Vector3 dir; public float score; public bool isBest; }
+    private List<SampleDebug> debugSamples = new List<SampleDebug>();
+    private Transform npcTransform; // 引用NPC，用于实时跟随
+
+    void Awake() => Instance = this;
+
+    // 让NPC注册自己，方便圈圈跟着走
+    public void RegisterNPC(Transform npc) => npcTransform = npc;
 
     public void MarkAsVisited(Vector3 worldPos, float radius)
     {
         Vector2Int center = WorldToGrid(worldPos);
         int r = Mathf.CeilToInt(radius / gridSize);
-
         for (int x = -r; x <= r; x++)
         {
             for (int y = -r; y <= r; y++)
@@ -32,102 +35,77 @@ public class ExplorationMap : MonoBehaviour
         }
     }
 
-    public bool IsVisited(Vector3 worldPos)
-    {
-        return visitedGrids.ContainsKey(WorldToGrid(worldPos));
-    }
-
-    // --- 核心增强：32点高精度全方位扫描 ---
-    // --- 修改后的核心函数 ---
-    // --- 修改后的核心函数 ---
-    // --- ExplorationMap.cs 修正部分 ---
-
     public Vector3 GetUnexploredPoint(Vector3 currentPos, float detectionRadius)
     {
+        debugSamples.Clear();
         Vector3 bestDirection = Vector3.zero;
-        float maxUnexploredCount = -1;
-        float visionRadius = 12f;
+        float maxScore = -1;
 
-        int sampleCount = 32;
-        for (int i = 0; i < sampleCount; i++)
+        for (int i = 0; i < 32; i++)
         {
-            float angle = i * (Mathf.PI * 2 / sampleCount);
+            float angle = i * (Mathf.PI * 2 / 32);
             Vector3 direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
 
-            // --- 修正点：检查目标点是否在地图（NavMesh）内 ---
+            // 物理检查：确保目标点在NavMesh内[cite: 10]
             Vector3 checkPoint = currentPos + direction * detectionRadius;
             NavMeshHit hit;
-            // 只有当该方向的点在导航网格附近时才进行评分
-            if (!NavMesh.SamplePosition(checkPoint, out hit, 3.0f, NavMesh.AllAreas))
-            {
-                continue; // 如果这个方向是地图外或障碍物，跳过该角度
-            }
+            if (!NavMesh.SamplePosition(checkPoint, out hit, 3.0f, NavMesh.AllAreas)) continue;
 
-            int density = CountUnexploredInRing(currentPos, direction, visionRadius, detectionRadius);
+            int density = CountUnexploredInRing(currentPos, direction, 12f, detectionRadius);
+            float score = density + Random.Range(0f, 0.1f);
 
-            float score = density + Random.Range(0f, 0.5f);
-            if (score > maxUnexploredCount)
-            {
-                maxUnexploredCount = score;
-                bestDirection = direction;
-            }
+            debugSamples.Add(new SampleDebug { dir = direction, score = score, isBest = false });
+            if (score > maxScore) { maxScore = score; bestDirection = direction; }
         }
 
-        // 如果环带内全是已探索区域，执行受限的随机跳出
-        if (maxUnexploredCount <= 0.5f)
+        // 高亮最优方向[cite: 10]
+        for (int i = 0; i < debugSamples.Count; i++)
         {
-            // 随机找一个点，但必须强制约束在 NavMesh 内
-            Vector2 rnd = Random.insideUnitCircle.normalized * 15f;
-            Vector3 target = currentPos + new Vector3(rnd.x, 0, rnd.y);
-            NavMeshHit hit;
-            if (NavMesh.SamplePosition(target, out hit, 20.0f, NavMesh.AllAreas))
+            if (debugSamples[i].dir == bestDirection)
             {
-                return hit.position;
+                var s = debugSamples[i]; s.isBest = true; debugSamples[i] = s;
             }
-            return currentPos;
         }
 
         return currentPos + bestDirection * detectionRadius;
     }
 
-    // 新增：沿射线在环带区间采样格子[cite: 3]
     private int CountUnexploredInRing(Vector3 origin, Vector3 dir, float minR, float maxR)
     {
         int count = 0;
-        // 按照网格大小 gridSize 步进，确保覆盖到区间内的每个潜在格子[cite: 3]
         for (float d = minR; d <= maxR; d += gridSize)
         {
-            Vector3 samplePos = origin + dir * d;
-            if (!IsVisited(samplePos)) count++;
+            if (!visitedGrids.ContainsKey(WorldToGrid(origin + dir * d))) count++;
         }
         return count;
     }
 
-    private int CountUnexploredNearby(Vector3 pos, int range)
-    {
-        int count = 0;
-        Vector2Int centerGrid = WorldToGrid(pos);
-        for (int x = -range; x <= range; x++)
-        {
-            for (int y = -range; y <= range; y++)
-            {
-                Vector2Int checkGrid = new Vector2Int(centerGrid.x + x, centerGrid.y + y);
-                if (!visitedGrids.ContainsKey(checkGrid)) count++;
-            }
-        }
-        return count;
-    }
-
+    public bool IsVisited(Vector3 worldPos) => visitedGrids.ContainsKey(WorldToGrid(worldPos));
     public Vector2Int WorldToGrid(Vector3 pos) => new Vector2Int(Mathf.RoundToInt(pos.x / gridSize), Mathf.RoundToInt(pos.z / gridSize));
     public Vector3 GridToWorld(Vector2Int grid) => new Vector3(grid.x * gridSize, 0, grid.y * gridSize);
 
     void OnDrawGizmos()
     {
-        if (visitedGrids == null || visitedGrids.Count == 0) return;
-        Gizmos.color = new Color(1f, 0f, 0f, 0.3f);
-        foreach (var grid in visitedGrids.Keys)
+        if (visitedGrids != null)
         {
-            Gizmos.DrawCube(GridToWorld(grid), new Vector3(gridSize * 0.9f, 0.1f, gridSize * 0.9f));
+            Gizmos.color = new Color(1, 0, 0, 0.1f);
+            foreach (var grid in visitedGrids.Keys)
+                Gizmos.DrawCube(GridToWorld(grid), new Vector3(gridSize, 0.1f, gridSize));
+        }
+
+        // 核心修正：使用 npcTransform.position 实现实时跟随显示
+        if (npcTransform == null || debugSamples.Count == 0) return;
+        Vector3 currentPos = npcTransform.position;
+
+        foreach (var sample in debugSamples)
+        {
+            if (sample.isBest) Gizmos.color = Color.yellow;
+            else Gizmos.color = Color.Lerp(Color.blue, Color.cyan, sample.score / 5f);
+
+            Vector3 start = currentPos + sample.dir * 12f;
+            Vector3 end = currentPos + sample.dir * 16f;
+            Gizmos.DrawLine(start, end);
+            if (sample.score > 0) Gizmos.DrawSphere(end, 0.1f * sample.score);
         }
     }
 }
