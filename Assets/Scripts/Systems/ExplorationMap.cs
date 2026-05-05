@@ -46,9 +46,9 @@ public class ExplorationMap : MonoBehaviour
             float angle = i * (Mathf.PI * 2 / 32);
             Vector3 direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
 
-            // 物理检查：确保目标点在NavMesh内[cite: 10]
             Vector3 checkPoint = currentPos + direction * detectionRadius;
             NavMeshHit hit;
+            // 物理检查：确保目标点在NavMesh内
             if (!NavMesh.SamplePosition(checkPoint, out hit, 3.0f, NavMesh.AllAreas)) continue;
 
             int density = CountUnexploredInRing(currentPos, direction, 12f, detectionRadius);
@@ -58,7 +58,21 @@ public class ExplorationMap : MonoBehaviour
             if (score > maxScore) { maxScore = score; bestDirection = direction; }
         }
 
-        // 高亮最优方向[cite: 10]
+        // --- 核心修复：保底逻辑 ---
+        // 如果没找到任何有效方向（比如都在地图外），则随机寻找一个附近的有效点
+        if (bestDirection == Vector3.zero)
+        {
+            NavMeshHit fallbackHit;
+            // 在周围 10 米内寻找最近的有效 NavMesh 位置
+            if (NavMesh.SamplePosition(currentPos + Random.insideUnitSphere * 10f, out fallbackHit, 10.0f, NavMesh.AllAreas))
+            {
+                return fallbackHit.position;
+            }
+            return currentPos; // 极度异常情况下保持原地
+        }
+        // -------------------------
+
+        // 高亮最优方向逻辑保持不变...
         for (int i = 0; i < debugSamples.Count; i++)
         {
             if (debugSamples[i].dir == bestDirection)
