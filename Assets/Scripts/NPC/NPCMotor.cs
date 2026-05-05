@@ -59,6 +59,8 @@ public class NPCMotor : MonoBehaviour
         if (targetObj != null) CheckInteraction(targetObj);
     }
 
+    // --- NPCMotor.cs 修正部分 ---
+
     void PlanNewPath(string action, GameObject target)
     {
         waypoints.Clear();
@@ -71,15 +73,18 @@ public class NPCMotor : MonoBehaviour
         }
         else if (action.Contains("探索") || action.Contains("寻找") || action.Contains("觅"))
         {
-            // 向地图系统申请未探索点，逻辑中已包含 16f 和 24f 的双重探测
             destination = ExplorationMap.Instance.GetUnexploredPoint(transform.position, detectionRadius);
 
-            // 绘制指向选定绿地的蓝色调试线
+            // 强保：将采样点严丝合缝地贴合到最近的 NavMesh 面上
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(destination, out hit, 10.0f, NavMesh.AllAreas))
+            {
+                destination = hit.position;
+            }
             Debug.DrawLine(transform.position, destination, Color.blue, 3f);
         }
         else
         {
-            // 常规随机游走
             Vector2 rnd = Random.insideUnitCircle * 10f;
             destination = transform.position + new Vector3(rnd.x, 0, rnd.y);
         }
@@ -87,8 +92,15 @@ public class NPCMotor : MonoBehaviour
         NavMeshPath path = new NavMeshPath();
         if (NavMesh.CalculatePath(transform.position, destination, NavMesh.AllAreas, path))
         {
-            waypoints.AddRange(path.corners);
+            // 只有路径合法时才添加航点
+            if (path.status != NavMeshPathStatus.PathInvalid)
+            {
+                waypoints.AddRange(path.corners);
+            }
         }
+
+        // --- 修正点：移除了之前强制 Add(destination) 的保底代码 ---
+        // 那个代码会导致 NPC 忽略 NavMesh 直接直线穿墙或出界
 
         if (waypoints.Count == 0 && target == null) FinishTask();
     }

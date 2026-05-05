@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine.AI;
 
 public class ExplorationMap : MonoBehaviour
 {
@@ -37,13 +38,15 @@ public class ExplorationMap : MonoBehaviour
     }
 
     // --- 核心增强：32点高精度全方位扫描 ---
+    // --- 修改后的核心函数 ---
+    // --- 修改后的核心函数 ---
+    // --- ExplorationMap.cs 修正部分 ---
+
     public Vector3 GetUnexploredPoint(Vector3 currentPos, float detectionRadius)
     {
-        Vector3 bestPoint = currentPos;
+        Vector3 bestDirection = Vector3.zero;
         float maxUnexploredCount = -1;
-
-        // 增加一个“远眺”半径，确保能跳出红区
-        float farLookRadius = detectionRadius + 8f; // 比如探测 24f 处
+        float visionRadius = 12f;
 
         int sampleCount = 32;
         for (int i = 0; i < sampleCount; i++)
@@ -51,27 +54,53 @@ public class ExplorationMap : MonoBehaviour
             float angle = i * (Mathf.PI * 2 / sampleCount);
             Vector3 direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
 
-            // 同时检查 16f(近处) 和 24f(远处) 的平均密度，确保它能看到远方的空地[cite: 5]
-            Vector3 nearPoint = currentPos + direction * detectionRadius;
-            Vector3 farPoint = currentPos + direction * farLookRadius;
+            // --- 修正点：检查目标点是否在地图（NavMesh）内 ---
+            Vector3 checkPoint = currentPos + direction * detectionRadius;
+            NavMeshHit hit;
+            // 只有当该方向的点在导航网格附近时才进行评分
+            if (!NavMesh.SamplePosition(checkPoint, out hit, 3.0f, NavMesh.AllAreas))
+            {
+                continue; // 如果这个方向是地图外或障碍物，跳过该角度
+            }
 
-            int density = CountUnexploredNearby(nearPoint, 4) + CountUnexploredNearby(farPoint, 6);
+            int density = CountUnexploredInRing(currentPos, direction, visionRadius, detectionRadius);
 
             float score = density + Random.Range(0f, 0.5f);
             if (score > maxUnexploredCount)
             {
                 maxUnexploredCount = score;
-                bestPoint = farPoint; // 目标直接定在远处的绿地上[cite: 5]
+                bestDirection = direction;
             }
         }
 
-        // 只有当远处也完全没绿地时，才随机乱走
-        if (maxUnexploredCount <= 1)
+        // 如果环带内全是已探索区域，执行受限的随机跳出
+        if (maxUnexploredCount <= 0.5f)
         {
-            return currentPos + new Vector3(Random.Range(-50, 50), 0, Random.Range(-50, 50));
+            // 随机找一个点，但必须强制约束在 NavMesh 内
+            Vector2 rnd = Random.insideUnitCircle.normalized * 15f;
+            Vector3 target = currentPos + new Vector3(rnd.x, 0, rnd.y);
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(target, out hit, 20.0f, NavMesh.AllAreas))
+            {
+                return hit.position;
+            }
+            return currentPos;
         }
 
-        return bestPoint;
+        return currentPos + bestDirection * detectionRadius;
+    }
+
+    // 新增：沿射线在环带区间采样格子[cite: 3]
+    private int CountUnexploredInRing(Vector3 origin, Vector3 dir, float minR, float maxR)
+    {
+        int count = 0;
+        // 按照网格大小 gridSize 步进，确保覆盖到区间内的每个潜在格子[cite: 3]
+        for (float d = minR; d <= maxR; d += gridSize)
+        {
+            Vector3 samplePos = origin + dir * d;
+            if (!IsVisited(samplePos)) count++;
+        }
+        return count;
     }
 
     private int CountUnexploredNearby(Vector3 pos, int range)
